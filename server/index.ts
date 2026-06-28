@@ -31,7 +31,8 @@ async function startServer(): Promise<void> {
   const app = express();
 
   // Middleware
-  app.use(cors());
+  const corsOrigin = config.isDev ? 'http://localhost:5173' : false;
+  app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json());
 
   // Health check route
@@ -72,14 +73,14 @@ async function startServer(): Promise<void> {
   }
 
   const modelConfig = loadModelConfig();
-  const gateway = new ModelGateway(modelConfig);
-  gateway.registerProvider(new OpenAIProvider());
-  gateway.registerProvider(new AnthropicProvider());
-  gateway.registerProvider(new OllamaProvider());
+  const gateway = new ModelGateway(modelConfig, auditLogger, wsHandler);
+  gateway.registerProvider('openai', new OpenAIProvider());
+  gateway.registerProvider('anthropic', new AnthropicProvider());
+  gateway.registerProvider('ollama', new OllamaProvider());
 
-  const agentManager = new AgentManager(gateway, memoryStore);
+  const agentManager = new AgentManager(gateway, memoryStore, auditLogger, wsHandler);
   const workflowEngine = new WorkflowEngine(agentManager, auditLogger, wsHandler);
-  const taskScheduler = new TaskScheduler(workflowEngine, agentManager, wsHandler, auditLogger);
+  const taskScheduler = new TaskScheduler(agentManager, workflowEngine, auditLogger, wsHandler);
 
   // Initialize container
   initContainer(taskScheduler);
@@ -91,12 +92,13 @@ async function startServer(): Promise<void> {
   setCodeGenerator(codeGenerator);
 
   // WebSocket message handler
-  wsHandler.onMessage(async (data) => {
+  wsHandler.onMessage((_ws, event) => {
     try {
-      const message = JSON.parse(data.toString());
-      if (message.type === 'intervention:requested') {
-        const { taskId, action } = message.payload as { taskId: string; action: InterventionAction };
-        await taskScheduler.intervene(taskId, action);
+      if (event.type === 'intervention:requested') {
+        const { taskId, action } = event.payload as { taskId: string; action: InterventionAction };
+        taskScheduler.intervene(taskId, action).catch((err) => {
+          logger.error('WebSocket', `Failed to handle intervention: ${err}`);
+        });
       }
     } catch (err) {
       logger.error('WebSocket', `Failed to handle message: ${err}`);

@@ -1,6 +1,7 @@
-import type Database from 'better-sqlite3';
+import type { BetterSqlite3Compat } from '../db/compat';
 import { randomUUID } from 'node:crypto';
 import type { Memory, MemoryType } from '../../shared/types';
+import { saveDatabase } from '../db/database';
 
 /** Row structure from the memories table */
 interface MemoryRow {
@@ -36,7 +37,7 @@ function rowToMemory(row: MemoryRow): Memory {
  * Uses soft-delete (sets deleted_at timestamp, queries filter by deleted_at IS NULL).
  */
 export class MemoryStore {
-  constructor(private db: Database.Database) {}
+  constructor(private db: BetterSqlite3Compat) {}
 
   /**
    * Save a new memory entry.
@@ -54,6 +55,8 @@ export class MemoryStore {
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
       .run(id, memory.type, memory.key, memory.value, metadataJson, now, now);
+
+    saveDatabase();
 
     return {
       id,
@@ -139,6 +142,7 @@ export class MemoryStore {
       )
       .run(updated.type, updated.key, updated.value, metadataJson, now, id);
 
+    saveDatabase();
     return updated;
   }
 
@@ -151,6 +155,8 @@ export class MemoryStore {
     this.db
       .prepare('UPDATE memories SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL')
       .run(now, id);
+
+    saveDatabase();
   }
 
   /**

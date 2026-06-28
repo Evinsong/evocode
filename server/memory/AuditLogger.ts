@@ -1,6 +1,7 @@
-import type Database from 'better-sqlite3';
+import type { BetterSqlite3Compat } from '../db/compat';
 import { randomUUID } from 'node:crypto';
 import type { AuditLog, AuditEventType, AuditFilter } from '../../shared/types';
+import { saveDatabase } from '../db/database';
 
 /** Row structure from the audit_logs table */
 interface AuditLogRow {
@@ -35,7 +36,7 @@ function rowToAuditLog(row: AuditLogRow): AuditLog {
  * Records are never deleted (no soft-delete for audit logs).
  */
 export class AuditLogger {
-  constructor(private db: Database.Database) {}
+  constructor(private db: BetterSqlite3Compat) {}
 
   /**
    * Log an audit event.
@@ -53,6 +54,8 @@ export class AuditLogger {
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(id, entry.taskId, entry.agentId, entry.eventType, entry.description, detailsJson, timestamp);
+
+    saveDatabase();
 
     return {
       id,

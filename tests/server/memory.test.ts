@@ -1,21 +1,33 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
+import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import { SCHEMA_SQL } from '../../server/db/schema';
 import { MemoryStore } from '../../server/memory/MemoryStore';
 import { SkillManager } from '../../server/memory/SkillManager';
 import { AuditLogger } from '../../server/memory/AuditLogger';
+import { wrapSqlJs, type BetterSqlite3Compat } from '../../server/db/compat';
 
-/** Create an in-memory database with schema for each test */
-function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
-  db.pragma('journal_mode = WAL');
-  db.exec(SCHEMA_SQL);
-  return db;
+// Mock saveDatabase so it doesn't try to write to disk in tests
+vi.mock('../../server/db/database', () => ({
+  saveDatabase: vi.fn(),
+  getDb: vi.fn(),
+}));
+
+let SQL: Awaited<ReturnType<typeof initSqlJs>>;
+
+beforeAll(async () => {
+  SQL = await initSqlJs();
+});
+
+/** Create an in-memory sql.js database with schema, wrapped for better-sqlite3 compat */
+function createTestDb(): BetterSqlite3Compat {
+  const db = new SQL.Database();
+  db.run(SCHEMA_SQL);
+  return wrapSqlJs(db);
 }
 
 // ============== MemoryStore Tests ==============
 describe('MemoryStore', () => {
-  let db: Database.Database;
+  let db: BetterSqlite3Compat;
   let store: MemoryStore;
 
   beforeEach(() => {
@@ -214,7 +226,7 @@ describe('MemoryStore', () => {
 
 // ============== SkillManager Tests ==============
 describe('SkillManager', () => {
-  let db: Database.Database;
+  let db: BetterSqlite3Compat;
   let manager: SkillManager;
 
   beforeEach(() => {
@@ -299,7 +311,7 @@ describe('SkillManager', () => {
 
 // ============== AuditLogger Tests ==============
 describe('AuditLogger', () => {
-  let db: Database.Database;
+  let db: BetterSqlite3Compat;
   let auditLogger: AuditLogger;
 
   beforeEach(() => {

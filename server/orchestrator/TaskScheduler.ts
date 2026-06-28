@@ -10,6 +10,7 @@ import type { AgentManager } from '../agents/AgentManager';
 import type { WorkflowEngine } from './WorkflowEngine';
 import type { AuditLogger } from '../memory/AuditLogger';
 import type { WebSocketHandler } from '../ws/WebSocketHandler';
+import { TaskCancelledError } from './WorkflowEngine';
 import { logger } from '../lib/logger';
 
 /**
@@ -142,7 +143,7 @@ export class TaskScheduler {
       logger.info('TaskScheduler', `Task ${taskId} completed`);
     } catch (err) {
       // Check if it was a cancellation
-      if (err instanceof Error && err.name === 'TaskCancelledError') {
+      if (err instanceof TaskCancelledError) {
         task.status = 'cancelled';
         task.updatedAt = Date.now();
         this.wsHandler.broadcast('task:failed', task);
@@ -205,6 +206,8 @@ export class TaskScheduler {
         task.updatedAt = now;
         description = `Task resumed: ${task.title}`;
         this.wsHandler.broadcast('task:updated', task);
+        // Notify WorkflowEngine to unblock the paused task
+        this.workflowEngine.resumeTask(taskId);
         break;
 
       case 'modify':

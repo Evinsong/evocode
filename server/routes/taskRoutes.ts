@@ -4,6 +4,23 @@ import type { ApiResponse, InterventionAction, Task, TaskPriority, TaskStep } fr
 
 const router = Router();
 
+/** Valid values for TaskPriority */
+const VALID_PRIORITIES: TaskPriority[] = ['low', 'medium', 'high'];
+
+/** Valid values for InterventionAction */
+const VALID_ACTIONS: InterventionAction[] = ['pause', 'resume', 'modify', 'reject', 'cancel'];
+
+/** Validate that a string is non-empty and of reasonable length */
+function validateString(value: unknown, fieldName: string, maxLength: number = 500): string | null {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return `${fieldName} must be a non-empty string`;
+  }
+  if (value.length > maxLength) {
+    return `${fieldName} must be at most ${maxLength} characters`;
+  }
+  return null;
+}
+
 /**
  * POST /api/tasks
  * Create a new task.
@@ -13,21 +30,40 @@ router.post('/', (req: Request, res: Response) => {
   try {
     const { title, description, priority } = req.body;
 
-    if (!title || !description) {
-      const response: ApiResponse<null> = {
-        code: 400,
-        data: null,
-        message: 'Missing required fields: title, description',
-      };
+    // Validate required fields
+    const titleError = validateString(title, 'title', 200);
+    if (titleError) {
+      const response: ApiResponse<null> = { code: 400, data: null, message: titleError };
+      res.status(400).json(response);
+      return;
+    }
+    const descError = validateString(description, 'description', 5000);
+    if (descError) {
+      const response: ApiResponse<null> = { code: 400, data: null, message: descError };
       res.status(400).json(response);
       return;
     }
 
+    // Validate priority if provided
+    let validatedPriority: TaskPriority | undefined;
+    if (priority !== undefined) {
+      if (!VALID_PRIORITIES.includes(priority)) {
+        const response: ApiResponse<null> = {
+          code: 400,
+          data: null,
+          message: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}`,
+        };
+        res.status(400).json(response);
+        return;
+      }
+      validatedPriority = priority;
+    }
+
     const scheduler = getTaskScheduler();
     const task = scheduler.createTask(
-      String(title),
-      String(description),
-      priority as TaskPriority | undefined,
+      String(title).trim(),
+      String(description).trim(),
+      validatedPriority,
     );
 
     const response: ApiResponse<Task> = { code: 0, data: task, message: 'success' };
@@ -123,18 +159,30 @@ router.post('/:id/intervene', async (req: Request, res: Response) => {
   try {
     const { action, modification } = req.body;
 
-    if (!action) {
+    // Validate action
+    if (!action || !VALID_ACTIONS.includes(action)) {
       const response: ApiResponse<null> = {
         code: 400,
         data: null,
-        message: 'Missing required field: action',
+        message: `Invalid or missing action. Must be one of: ${VALID_ACTIONS.join(', ')}`,
+      };
+      res.status(400).json(response);
+      return;
+    }
+
+    // Validate modification for 'modify' action
+    if (action === 'modify' && (!modification || typeof modification !== 'string' || modification.trim().length === 0)) {
+      const response: ApiResponse<null> = {
+        code: 400,
+        data: null,
+        message: 'Modification text is required for modify action',
       };
       res.status(400).json(response);
       return;
     }
 
     const scheduler = getTaskScheduler();
-    await scheduler.intervene(req.params.id, action as InterventionAction, modification);
+    await scheduler.intervene(req.params.id, action, modification);
 
     const response: ApiResponse<{ intervened: boolean }> = {
       code: 0,

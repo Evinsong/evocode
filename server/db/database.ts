@@ -2,8 +2,10 @@ import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SCHEMA_SQL } from './schema';
+import { runMigrations } from './migrations';
 import { getEnv } from '../lib/config';
 import { logger } from '../lib/logger';
+import { wrapSqlJs, type BetterSqlite3Compat } from './compat';
 
 /** Singleton database instance */
 let dbInstance: SqlJsDatabase | null = null;
@@ -74,6 +76,9 @@ export async function initDatabase(): Promise<void> {
   // Save after schema creation
   saveToDisk();
 
+  // Run any pending migrations
+  runMigrations([]);
+
   logger.info('Database', `Initialized SQLite at ${dbPath}`);
 }
 
@@ -91,11 +96,11 @@ export function initDatabaseSync(): void {
  * @returns The initialized Database instance
  * @throws Error if database has not been initialized
  */
-export function getDb(): SqlJsDatabase {
+export function getDb(): BetterSqlite3Compat {
   if (!dbInstance) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
-  return dbInstance;
+  return wrapSqlJs(dbInstance);
 }
 
 /**

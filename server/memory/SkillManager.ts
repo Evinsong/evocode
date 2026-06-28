@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { BetterSqlite3Compat } from '../db/compat';
 import { randomUUID } from 'node:crypto';
 import type { Skill, SkillSource } from '../../shared/types';
 
@@ -40,7 +40,7 @@ function rowToSkill(row: SkillRow): Skill {
  * P1 feature: autoCreate() is reserved for future automatic skill generation.
  */
 export class SkillManager {
-  constructor(private db: Database.Database) {}
+  constructor(private db: BetterSqlite3Compat) {}
 
   /**
    * Save a new skill.

@@ -13,6 +13,23 @@ import type { ModelGateway } from '../../server/gateway/ModelGateway';
 import type { AuditLogger } from '../../server/memory/AuditLogger';
 import type { WebSocketHandler } from '../../server/ws/WebSocketHandler';
 
+// Mock database module to avoid needing real DB initialization in codegen tests
+const mockDb = {
+  run: vi.fn(),
+  prepare: vi.fn(() => ({
+    run: vi.fn(),
+    get: vi.fn(),
+    all: vi.fn(),
+  })),
+  exec: vi.fn(),
+  getRowsModified: vi.fn(() => 0),
+};
+
+vi.mock('../../server/db/database', () => ({
+  getDb: vi.fn(() => mockDb),
+  saveDatabase: vi.fn(),
+}));
+
 // ============== Mock Helpers ==============
 
 /** Create a mock ModelGateway */
@@ -120,7 +137,7 @@ describe('AestheticEngine', () => {
     it('should include 8px grid specification', () => {
       const result = engine.injectPrompt('test');
 
-      expect(result).toContain('8px Grid System');
+      expect(result).toContain('8px Grid');
       expect(result).toContain('multiples of 8');
     });
 

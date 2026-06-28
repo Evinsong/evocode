@@ -25,19 +25,19 @@ export class TaskCancelledError extends Error {
 /** Ordered sequence of agent roles for the sequential workflow */
 const WORKFLOW_SEQUENCE: AgentRole[] = ['requirements', 'architecture', 'coding', 'testing', 'review'];
 
-/** Polling interval for checking pause status (ms) */
-const PAUSE_POLL_INTERVAL_MS = 500;
-
 /**
  * WorkflowEngine orchestrates multi-agent execution.
  * Implements the sequential workflow: requirements → architecture → coding → testing → review.
  * Each agent's output becomes the next agent's input.
- * Supports pause/resume via status polling and cancel via TaskCancelledError.
+ * Supports pause/resume via Promise-based notification and cancel via TaskCancelledError.
  */
 export class WorkflowEngine {
   private agentManager: AgentManager;
   private auditLogger: AuditLogger;
   private wsHandler: WebSocketHandler;
+
+  /** Map of task ID → resume resolver, used for pause/resume signaling */
+  private resumeResolvers: Map<string, () => void> = new Map();
 
   /**
    * Create a WorkflowEngine.
@@ -53,6 +53,20 @@ export class WorkflowEngine {
     this.agentManager = agentManager;
     this.auditLogger = auditLogger;
     this.wsHandler = wsHandler;
+  }
+
+  /**
+   * Notify a paused task to resume.
+   * Resolves the pause Promise so the workflow continues.
+   * @param taskId - Task ID to resume
+   */
+  resumeTask(taskId: string): void {
+    const resolver = this.resumeResolvers.get(taskId);
+    if (resolver) {
+      this.resumeResolvers.delete(taskId);
+      resolver();
+      logger.debug('WorkflowEngine', `[${taskId}] Task resume signal sent`);
+    }
   }
 
   /**
@@ -150,21 +164,41 @@ export class WorkflowEngine {
 
   /**
    * Check if the task is paused or cancelled.
-   * If paused, waits in a polling loop until resumed or cancelled.
+   * If paused, waits via Promise until resumeTask() is called or task is cancelled.
    * If cancelled, throws TaskCancelledError.
    * @param task - The task to check
    * @throws TaskCancelledError if the task status is 'cancelled'
    */
   private async checkTaskStatus(task: Task): Promise<void> {
-    // Wait while paused
-    while (task.status === 'paused') {
-      logger.debug('WorkflowEngine', `[${task.id}] Task paused, waiting for resume...`);
-      await new Promise((resolve) => setTimeout(resolve, PAUSE_POLL_INTERVAL_MS));
-    }
-
-    // Throw if cancelled
+    // If cancelled, throw immediately
     if (task.status === 'cancelled') {
       throw new TaskCancelledError(task.id);
+    }
+
+    // If paused, wait for resume or cancel signal
+    if (task.status === 'paused') {
+      logger.debug('WorkflowEngine', `[${task.id}] Task paused, waiting for resume...`);
+      await new Promise<void>((resolve) => {
+        this.resumeResolvers.set(task.id, resolve);
+        // Also poll for cancellation (every 1s) so we don't miss a cancel signal
+        const cancelCheck = setInterval(() => {
+          if (task.status === 'cancelled') {
+            clearInterval(cancelCheck);
+            this.resumeResolvers.delete(task.id);
+            resolve();
+          }
+        }, 1000);
+        // Clean up interval when resolved
+        const originalResolve = resolve;
+        this.resumeResolvers.set(task.id, () => {
+          clearInterval(cancelCheck);
+          originalResolve();
+        });
+      });
+      // Re-check after waking up
+      if (task.status === 'cancelled') {
+        throw new TaskCancelledError(task.id);
+      }
     }
   }
 

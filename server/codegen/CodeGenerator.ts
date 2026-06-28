@@ -10,7 +10,7 @@ import type { AuditLogger } from '../memory/AuditLogger';
 import type { WebSocketHandler } from '../ws/WebSocketHandler';
 import { AestheticEngine } from './AestheticEngine';
 import { PreviewEngine } from './PreviewEngine';
-import { getDb } from '../db/database';
+import { getDb, saveDatabase } from '../db/database';
 import { logger } from '../lib/logger';
 
 /**
@@ -328,26 +328,37 @@ ${preset.description}
    */
   private saveFiles(files: GeneratedFile[], taskId?: string): void {
     const db = getDb();
-    const insert = db.prepare(
-      `INSERT INTO generated_files (id, task_id, filename, path, content, language, framework, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
 
-    const now = Date.now();
-    for (const file of files) {
-      insert.run(
-        file.id,
-        file.taskId ?? taskId ?? 'standalone',
-        file.filename,
-        file.path,
-        file.content,
-        file.language,
-        file.framework,
-        now,
+    // Use sql.js transaction for atomic batch insert
+    db.run('BEGIN TRANSACTION');
+    try {
+      const insert = db.prepare(
+        `INSERT INTO generated_files (id, task_id, filename, path, content, language, framework, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-    }
 
-    logger.info('CodeGenerator', `Saved ${files.length} files to database`);
+      const now = Date.now();
+      for (const file of files) {
+        insert.run(
+          file.id,
+          file.taskId ?? taskId ?? 'standalone',
+          file.filename,
+          file.path,
+          file.content,
+          file.language,
+          file.framework,
+          now,
+        );
+      }
+
+      db.run('COMMIT');
+      saveDatabase();
+      logger.info('CodeGenerator', `Saved ${files.length} files to database`);
+    } catch (err) {
+      db.run('ROLLBACK');
+      logger.error('CodeGenerator', `Failed to save files: ${err}`);
+      throw err;
+    }
   }
 
   /**
